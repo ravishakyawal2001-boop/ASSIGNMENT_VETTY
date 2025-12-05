@@ -1,12 +1,13 @@
 
 -- Q1: What is the count of purchases per month (excluding refunded purchases)? 
 SELECT
-    date_trunc('month', purchase_time) AS purchase_month,
+    DATEFROMPARTS(YEAR(purchase_time), MONTH(purchase_time), 1) AS purchase_month,
     COUNT(*) AS purchase_count
 FROM transactions
-WHERE refund_time IS NULL              -- exclude refunded purchases
-GROUP BY date_trunc('month', purchase_time)
+WHERE refund_item IS NULL
+GROUP BY DATEFROMPARTS(YEAR(purchase_time), MONTH(purchase_time), 1)
 ORDER BY purchase_month;
+
 
 
 
@@ -18,8 +19,8 @@ WITH store_counts AS (
         store_id,
         COUNT(*) AS num_transactions
     FROM transactions
-    WHERE purchase_time >= DATE '2020-10-01'
-      AND purchase_time <  DATE '2020-11-01'
+    WHERE purchase_time >= '2020-10-01' -- Removed DATE keyword
+      AND purchase_time < '2020-11-01'  -- Removed DATE keyword
     GROUP BY store_id
 )
 SELECT COUNT(*) AS num_stores_with_5_plus_orders
@@ -35,35 +36,32 @@ WHERE num_transactions >= 5;
 -- Q3: For each store, what is the shortest interval (in min) from purchase to refund time? 
 SELECT
     store_id,
-    MIN(EXTRACT(EPOCH FROM (refund_time - purchase_time)) / 60.0)
-        AS min_minutes_to_refund
-FROM transactions
-WHERE refund_time IS NOT NULL
-GROUP BY store_id
-ORDER BY store_id;
+    MIN(DATEDIFF(MINUTE, purchase_time, refund_item)) AS shortest_refund_interval_min
+FROM
+    transactions
+WHERE
+    refund_item IS NOT NULL
+GROUP BY
+    store_id;
 
 
 
 
 -- Q4: What is the gross_transaction_value of every store’s first order? 
-WITH ranked_orders AS (
-    SELECT
-        store_id,
-        purchase_time,
-        gross_transaction_value,
-        ROW_NUMBER() OVER (
-            PARTITION BY store_id
-            ORDER BY purchase_time
-        ) AS rn
-    FROM transactions
-)
 SELECT
     store_id,
-    purchase_time AS first_order_time,
-    gross_transaction_value AS first_order_gross_value
-FROM ranked_orders
-WHERE rn = 1
-ORDER BY store_id;
+    gross_transaction_value
+FROM
+(
+    SELECT
+        store_id,
+        gross_transaction_value,
+        ROW_NUMBER() OVER (PARTITION BY store_id ORDER BY purchase_time ASC) as rn
+    FROM
+        transactions
+) AS ranked_transactions
+WHERE
+    rn = 1;
 
 
 
@@ -82,8 +80,7 @@ WITH first_purchase AS (
             ORDER BY purchase_time
         ) AS rn
     FROM transactions t
-    -- If we *only* want non-refunded first purchases, uncomment:
-    -- WHERE refund_time IS NULL
+  
 ),
 first_purchase_items AS (
     SELECT
@@ -97,13 +94,13 @@ first_purchase_items AS (
      AND fp.item_id  = i.item_id
     WHERE fp.rn = 1
 )
-SELECT
+SELECT TOP 1
     item_name,
     COUNT(*) AS num_buyers
 FROM first_purchase_items
 GROUP BY item_name
-ORDER BY num_buyers DESC, item_name
-LIMIT 1;     
+ORDER BY num_buyers DESC, item_name;
+   
 
 
 
@@ -118,30 +115,19 @@ LIMIT 1;
 
 SELECT
     t.*,
-    CASE
-        WHEN refund_time IS NOT NULL
-         AND refund_time <= purchase_time + INTERVAL '72 hours'
-        THEN 1
-        ELSE 0
-    END AS refund_processable_flag
-FROM transactions t;
-
-
-
-SELECT
-    t.*,
     i.item_category,
     i.item_name,
     CASE
-        WHEN t.refund_time IS NOT NULL
-         AND t.refund_time <= t.purchase_time + INTERVAL '72 hours'
+        WHEN t.refund_item IS NOT NULL
+             AND DATEDIFF(HOUR, t.purchase_time, t.refund_item) <= 72
         THEN 1
         ELSE 0
     END AS refund_processable_flag
 FROM transactions t
-JOIN items i
+LEFT JOIN items i
   ON t.store_id = i.store_id
  AND t.item_id  = i.item_id;
+
 
 
 -- Q7: Create a rank by buyer_id column in the transaction items table and filter for only the second
@@ -157,11 +143,12 @@ WITH ranked_purchases AS (
             ORDER BY purchase_time
         ) AS purchase_rank
     FROM transactions t
-    WHERE refund_time IS NULL        
 )
 SELECT *
 FROM ranked_purchases
 WHERE purchase_rank = 2;
+
+
 
 
 
